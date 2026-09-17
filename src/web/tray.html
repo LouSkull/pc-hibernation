@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Hibernation</title>
+<style>
+  :root{
+    --accent:#97f3ce; --bg:#0d1218; --raise:#161c25;
+    --text:#eaf0f6; --muted:#8a97a8; --edge:rgba(255,255,255,.08); --danger:#ff8a8a;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html{height:100%}
+  body{min-height:100%}
+  body{
+    background:var(--bg); color:var(--text); overflow:hidden; cursor:default;
+    font:13px/1.5 "Segoe UI Variable Text","Segoe UI",system-ui,sans-serif;
+    -webkit-user-select:none; user-select:none;
+    display:flex; flex-direction:column; padding:12px;
+    opacity:0; transform:translateY(6px);
+    transition:opacity .16s ease, transform .16s cubic-bezier(.2,.8,.2,1);
+  }
+  body.ready{opacity:1;transform:none}
+
+  .head{display:flex;align-items:center;gap:9px;padding:2px 6px 12px}
+  .dot{width:8px;height:8px;border-radius:50%;background:var(--accent);flex:0 0 8px}
+  .dot.off{background:#48525f}
+  .head .name{font-size:12.5px;font-weight:600;letter-spacing:.01em}
+  .head .ver{font-size:11px;color:var(--muted)}
+
+  .state{
+    padding:11px 12px;border-radius:12px;background:var(--raise);
+    border:1px solid var(--edge);margin-bottom:10px
+  }
+  .state b{display:block;font-size:12.5px;font-weight:600;margin-bottom:3px}
+  .state span{display:block;font-size:11px;color:var(--muted);line-height:1.6}
+  /* Always laid out, only hidden: the panel keeps one fixed height either way. */
+  .lock{
+    display:inline-flex;align-items:center;gap:5px;margin-top:7px;padding:3px 8px;
+    border-radius:20px;font-size:10.5px;font-weight:600;
+    background:color-mix(in srgb,var(--accent) 15%,transparent);color:var(--accent);
+    visibility:hidden
+  }
+  .lock svg{width:11px;height:11px;stroke:currentColor;fill:none;stroke-width:2}
+
+  .items{display:flex;flex-direction:column;gap:2px}
+  .item{
+    display:flex;align-items:center;gap:11px;width:100%;
+    padding:9px 11px;border:0;border-radius:10px;background:transparent;
+    color:var(--text);font:inherit;font-size:12.5px;font-weight:500;cursor:pointer;text-align:left
+  }
+  .item svg{width:16px;height:16px;stroke:var(--muted);fill:none;stroke-width:1.8;
+    stroke-linecap:round;stroke-linejoin:round;flex:0 0 16px}
+  .item:hover{background:var(--raise)}
+  .item:hover svg{stroke:var(--accent)}
+  .item.quit:hover{background:#3a1f26;color:#ffd9de}
+  .item.quit:hover svg{stroke:var(--danger)}
+  .item small{margin-left:auto;color:var(--muted);font-size:10.5px;font-weight:400}
+
+  .sep{height:1px;background:var(--edge);margin:7px 4px}
+  .foot{padding:8px 6px 2px;font-size:10px;color:#5d6878;text-align:center}
+  #trail{position:fixed;inset:0;width:100%;height:100%;pointer-events:none;z-index:10}
+</style>
+<style id="pointerStyle"></style>
+</head>
+<body>
+  <div class="head">
+    <div class="dot" id="dot"></div>
+    <div class="name">Hibernation</div>
+    <div class="ver" id="ver">1.0</div>
+  </div>
+
+  <div class="state">
+    <b id="stTitle">Automatic is on</b>
+    <span id="stBody">—</span>
+    <div class="lock" id="lockBadge">
+      <svg viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="9" rx="2.5"/><path d="M8.5 11V8a3.5 3.5 0 0 1 7 0v3"/></svg>
+      Lock armed
+    </div>
+  </div>
+
+  <div class="items">
+    <button class="item" data-act="open">
+      <svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="14" rx="2"/><path d="M8 21h8"/></svg>
+      Open Hibernation
+    </button>
+    <button class="item" data-act="start">
+      <svg viewBox="0 0 24 24"><path d="M8 5.5l10 6.5-10 6.5z"/></svg>
+      Start now <small id="kToggle"></small>
+    </button>
+    <button class="item" data-act="toggle">
+      <svg viewBox="0 0 24 24" id="pauseIcon"><rect x="8" y="5" width="3" height="14" rx="1"/><rect x="14" y="5" width="3" height="14" rx="1"/></svg>
+      <span id="toggleLabel">Pause automatic</span> <small id="kPause"></small>
+    </button>
+    <div class="sep"></div>
+    <button class="item quit" data-act="quit">
+      <svg viewBox="0 0 24 24"><path d="M10 5H6a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h4"/><path d="M15 8l4 4-4 4M19 12H10"/></svg>
+      Quit
+    </button>
+  </div>
+
+  <div class="foot">Esc to close</div>
+  <canvas id="trail" aria-hidden="true"></canvas>
+
+<script>
+(() => {
+const send = m => window.chrome?.webview?.postMessage(m);
+const $ = s => document.querySelector(s);
+const ACCENT_HEX = ["#97f3ce","#7fd0ff","#b99dff","#f9a4c9","#f4cc80","#ebf0f6"];
+const TONE_BG = ["#0d1218","#0b0f1c","#050608"];
+const TONE_RAISE = ["#161c25","#141a2c","#111318"];
+const MODS = [["Ctrl",2],["Alt",1],["Shift",4],["Win",8]];   // conventional reading order
+
+function keyName(code) {
+  if (!code) return '';
+  if (code >= 65 && code <= 90) return String.fromCharCode(code);
+  if (code >= 112 && code <= 123) return 'F' + (code - 111);
+  if (code >= 48 && code <= 57) return String.fromCharCode(code);
+  return '';
+}
+function combo(mods, key) {
+  const name = keyName(key);
+  if (!name) return '';
+  const parts = MODS.filter(([, bit]) => mods & bit).map(([n]) => n);
+  parts.push(name);
+  return parts.join('+');
+}
+
+function apply(S) {
+  const root = document.documentElement.style;
+  root.setProperty('--accent', ACCENT_HEX[S.accent] || ACCENT_HEX[0]);
+  root.setProperty('--bg', TONE_BG[S.tone] || TONE_BG[0]);
+  root.setProperty('--raise', TONE_RAISE[S.tone] || TONE_RAISE[0]);
+
+  if (S.version) $('#ver').textContent = S.version;
+  $('#dot').classList.toggle('off', !S.enabled);
+  $('#stTitle').textContent = S.enabled ? 'Automatic is on' : 'Automatic is paused';
+  $('#stBody').innerHTML = (S.enabled ? 'Starts after ' + S.delay + 's idle' : 'It will not start on its own') +
+    '<br>' + (S.allMonitors ? 'All monitors' : 'Primary monitor') + ' · ' + S.monitors + ' detected';
+  $('#lockBadge').style.visibility = (S.hasPassword && S.lockEnabled) ? 'visible' : 'hidden';
+  $('#toggleLabel').textContent = S.enabled ? 'Pause automatic' : 'Resume automatic';
+  $('#pauseIcon').innerHTML = S.enabled
+    ? '<rect x="8" y="5" width="3" height="14" rx="1"/><rect x="14" y="5" width="3" height="14" rx="1"/>'
+    : '<path d="M8 5.5l10 6.5-10 6.5z"/>';
+  if (S.hotkeysEnabled) {
+    $('#kToggle').textContent = combo(S.hotkeyToggleMods, S.hotkeyToggleKey);
+    $('#kPause').textContent = combo(S.hotkeyPauseMods, S.hotkeyPauseKey);
+  } else {
+    $('#kToggle').textContent = ''; $('#kPause').textContent = '';
+  }
+  document.body.classList.add('ready');
+}
+
+document.addEventListener('click', e => {
+  const item = e.target.closest('[data-act]');
+  if (item) send('act:' + item.dataset.act);
+});
+document.addEventListener('keydown', e => { if (e.key === 'Escape') send('act:close'); });
+
+// The same pointer as the main window, sent by the host as 1x and 2x pictures.
+let pointer = null, accent = ACCENT_HEX[0];
+const trail = { canvas: $('#trail'), ctx: null, points: [], ripples: [], frame: 0 };
+function applyPointer(c) {
+  pointer = c && c.on ? c : null;
+  const at = pointer ? ' ' + c.x + ' ' + c.y : '';
+  $('#pointerStyle').textContent = pointer
+    ? '*,*::before,*::after{cursor:url("' + c.url1 + '")' + at + ',auto!important;' +
+      'cursor:image-set(url("' + c.url1 + '") 1x, url("' + c.url2 + '") 2x)' + at + ',auto!important}'
+    : '';
+  if (!pointer || !pointer.trail) { trail.points = []; trail.ripples = []; trail.ctx?.clearRect(0, 0, innerWidth, innerHeight); }
+}
+function sizeTrail() {
+  const dpr = window.devicePixelRatio || 1;
+  trail.canvas.width = Math.round(innerWidth * dpr); trail.canvas.height = Math.round(innerHeight * dpr);
+  trail.ctx = trail.canvas.getContext('2d'); trail.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+}
+function drawTrail(now) {
+  trail.frame = 0;
+  const ctx = trail.ctx, size = pointer ? pointer.size : 28;
+  ctx.clearRect(0, 0, innerWidth, innerHeight);
+  trail.points = trail.points.filter(p => now - p.t < 180);
+  trail.ripples = trail.ripples.filter(r => now - r.t < 440);
+  ctx.strokeStyle = (pointer && pointer.color) || accent; ctx.lineCap = 'round';
+  for (let i = 1; i < trail.points.length; i++) {
+    const a = trail.points[i - 1], b = trail.points[i], fresh = 1 - (now - b.t) / 180;
+    ctx.globalAlpha = .5 * fresh * fresh; ctx.lineWidth = Math.max(1, size * .24 * fresh);
+    ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
+  }
+  for (const r of trail.ripples) {
+    const k = (now - r.t) / 440;
+    ctx.globalAlpha = .6 * (1 - k); ctx.lineWidth = .8 + 2.2 * (1 - k);
+    ctx.beginPath(); ctx.arc(r.x, r.y, size * (.3 + .7 * Math.sqrt(k)), 0, Math.PI * 2); ctx.stroke();
+  }
+  ctx.globalAlpha = 1;
+  if (trail.points.length || trail.ripples.length) trail.frame = requestAnimationFrame(drawTrail);
+}
+const wakeTrail = () => { if (!trail.frame) trail.frame = requestAnimationFrame(drawTrail); };
+sizeTrail();
+window.addEventListener('resize', sizeTrail);
+document.addEventListener('pointermove', e => {
+  if (!pointer || !pointer.trail) return;
+  trail.points.push({ x: e.clientX, y: e.clientY, t: performance.now() });
+  if (trail.points.length > 64) trail.points.shift();
+  wakeTrail();
+}, { passive: true });
+document.addEventListener('pointerdown', e => {
+  if (!pointer || !pointer.trail) return;
+  trail.ripples.push({ x: e.clientX, y: e.clientY, t: performance.now() });
+  wakeTrail();
+}, { passive: true });
+document.documentElement.addEventListener('mouseleave', () => { trail.points = []; });
+
+window.chrome?.webview?.addEventListener('message', e => {
+  const data = e.data;
+  if (typeof data !== 'string') return;
+  if (data[0] === '{') { const S = JSON.parse(data); accent = ACCENT_HEX[S.accent] || ACCENT_HEX[0]; apply(S); }
+  else if (data.startsWith('cursor:')) applyPointer(JSON.parse(data.slice(7)));
+});
+window.addEventListener('load', () => send('ready'));
+// Test hooks, so the panel can be checked without the native host.
+})();
+</script>
+</body>
+</html>
