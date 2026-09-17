@@ -1,0 +1,49 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><style>
+*{box-sizing:border-box}html,body{height:100%}body{margin:0;background:#000;overflow:hidden;color:white;font:16px 'Segoe UI',sans-serif}
+html.bare,html.bare *{cursor:none!important}
+video,img,canvas{position:absolute;width:100vw;height:100vh;object-fit:contain;display:none}
+#clock{position:absolute;left:0;right:0;top:12%;text-align:center;font-variant-numeric:tabular-nums;text-shadow:0 2px 15px #000;pointer-events:none}
+</style><style id="pointerStyle"></style></head><body><video id="video" muted loop playsinline></video><img id="image" alt=""><canvas id="still"></canvas><div id="clock"></div>
+<script>
+const send=m=>window.chrome?.webview?.postMessage(m),video=document.querySelector('video'),img=document.querySelector('img');
+let settings={},frames=0,elapsed=0,reportAt=0,frameHandle=0,clockTimer=null;
+function tick(){const c=document.querySelector('#clock');c.hidden=!settings.clock;c.textContent=new Date().toLocaleTimeString(undefined,{hour:'2-digit',minute:'2-digit',...(settings.clockSeconds?{second:'2-digit'}:{}),hour12:!settings.clockFormat24});}
+video.onerror=img.onerror=()=>send('mediaError');
+img.onload=()=>send('mediaLoaded');
+function frame(now,meta){
+  if(!settings.debug || video.paused)return;
+  if(reportAt){frames++;elapsed=now-reportAt;if(elapsed>=1000){send('videoStats:'+JSON.stringify({fps:frames*1000/elapsed,dropped:video.getVideoPlaybackQuality().droppedVideoFrames,width:video.videoWidth,height:video.videoHeight}));frames=0;reportAt=now;}}
+  else reportAt=now;
+  frameHandle=video.requestVideoFrameCallback(frame);
+}
+
+// Hide cursor wins; otherwise the app's own pointer, the same one the other windows use.
+function applyPointer(c){
+  document.documentElement.classList.toggle('bare',settings.hideCursor!==false);
+  const on=c&&c.on&&settings.hideCursor===false,at=on?' '+c.x+' '+c.y:'';
+  document.getElementById('pointerStyle').textContent=on?'html,html *{cursor:url("'+c.url1+'")'+at+',default!important;cursor:image-set(url("'+c.url1+'") 1x, url("'+c.url2+'") 2x)'+at+',default!important}':'';
+}
+let pointer=null;
+window.chrome?.webview?.addEventListener('message',e=>{
+  if(typeof e.data==='string'&&e.data.startsWith('cursor:')){try{pointer=JSON.parse(e.data.slice(7));}catch{pointer=null;}applyPointer(pointer);return;}
+  if(e.data==='rest') {
+    video.pause();if(frameHandle&&video.cancelVideoFrameCallback)video.cancelVideoFrameCallback(frameHandle);
+    if(img.src) {const canvas=document.querySelector('#still');canvas.width=img.naturalWidth;canvas.height=img.naturalHeight;canvas.style.objectFit=img.style.objectFit;
+      if(canvas.width&&canvas.height){canvas.getContext('2d').drawImage(img,0,0);canvas.style.display='block';img.style.display='none';img.removeAttribute('src');}}
+    send('rested');return;
+  }
+  if(typeof e.data!=='string'||!e.data.startsWith('media:'))return;
+  const data=JSON.parse(e.data.slice(6));settings=data;
+  applyPointer(pointer);
+  clearInterval(clockTimer);if(data.clock)clockTimer=setInterval(tick,1000);
+  const animatedImage=/\.(gif|webp)(\?|$)/i.test(data.url);const target=animatedImage?img:video;
+  video.pause();video.removeAttribute('src');img.removeAttribute('src');video.style.display=img.style.display='none';
+  target.style.display='block';target.style.objectFit=['contain','cover','fill'][data.fit]||'contain';
+  target.src=data.url;
+  if(!animatedImage)video.play().then(()=>{if(data.debug&&video.requestVideoFrameCallback)frameHandle=video.requestVideoFrameCallback(frame);}).catch(()=>send('mediaError'));
+  const c=document.querySelector('#clock');c.style.fontSize=(48*data.clockSize/100)+'px';c.style.opacity=data.clockOpacity/100;
+  c.style.top=['12%','44%','80%'][data.clockPosition]||'12%';tick();
+});
+send('ready');
+</script></body></html>

@@ -1,0 +1,10 @@
+#pragma once
+// Generated from version.h.in by CMake. The single source of truth is the VERSION
+// file at the repository root: edit it, build, and the number flows into the About
+// page, the update check and the Windows file properties of Hibernation.exe.
+#define APP_VERSION_MAJOR @PROJECT_VERSION_MAJOR@
+#define APP_VERSION_MINOR @PROJECT_VERSION_MINOR@
+#define APP_VERSION_PATCH @PROJECT_VERSION_PATCH@
+#define APP_VERSION_STRING "@PROJECT_VERSION@"
+#define APP_REPO_OWNER "LouSkull"
+#define APP_REPO_NAME "pc-hibernation"
