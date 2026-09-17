@@ -1,9 +1,0 @@
-#include "resource.h"
-
-IDI_APPICON ICON "app.ico"
-
-IDR_APP_HTML  RCDATA "web/app.html"
-IDR_LOCK_HTML RCDATA "web/lock.html"
-IDR_TRAY_HTML RCDATA "web/tray.html"
-
-IDR_MEDIA_HTML RCDATA "web/media.html"
